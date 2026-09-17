@@ -229,12 +229,23 @@ async function deleteTask(task: any) {
 async function confirmAbandon() {
   if (!selectedGoal.value) return
   try {
-    await ElMessageBox.confirm(
-      `确定放弃目标「${selectedGoal.value.title}」吗？放弃不是失败，只是这个阶段不太合适～`,
-      '放弃目标',
-      { confirmButtonText: '放弃', cancelButtonText: '再想想', type: 'warning' },
+    const { value: reason } = await ElMessageBox.prompt(
+      `为什么暂时放下「${selectedGoal.value.title}」？`,
+      '放弃目标 💔',
+      {
+        confirmButtonText: '放弃',
+        cancelButtonText: '再想想',
+        inputPlaceholder: '比如：时间不够 / 方向变了 / 太难了...',
+        inputValidator: (v) => {
+          if (!v || !v.trim()) return '放弃理由不能为空哦～'
+          return true
+        },
+      },
     )
-    await client.patch(`/goals/${selectedGoal.value.id}`, { status: 'abandoned' })
+    await client.patch(`/goals/${selectedGoal.value.id}`, {
+      status: 'abandoned',
+      abandon_reason: reason.trim(),
+    })
     ElMessage.success('已标记为放弃 💔 没关系的')
     await load()
   } catch {
@@ -371,7 +382,6 @@ onMounted(load)
                   <button class="decompose-btn" @click="aiDecompose(selectedGoal)">✨ AI 拆解</button>
                   <button v-if="selectedGoal.status !== 'abandoned'" class="abandon-btn" @click="confirmAbandon">💔 放弃</button>
                   <button v-if="selectedGoal.status === 'abandoned'" class="reactivate-btn" @click="reactivateGoal">🌱 重新开始</button>
-                  <button class="delete-btn" @click="confirmDelete(selectedGoal)">🗑️</button>
                 </template>
               </div>
             </div>

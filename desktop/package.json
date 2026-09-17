@@ -1,0 +1,14 @@
+{
+  "name": "personal-agent-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "个人成长管理助手桌面端",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/start.js",
+    "dev": "node scripts/start.js"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}

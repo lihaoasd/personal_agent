@@ -107,6 +107,21 @@ CREATE TABLE IF NOT EXISTS app_state (
   value      TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- Agent Loop 执行 trace
+CREATE TABLE IF NOT EXISTS agent_traces (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id   INTEGER NOT NULL,
+  user_message TEXT NOT NULL,
+  step         INTEGER NOT NULL,
+  role         TEXT NOT NULL,
+  content      TEXT NOT NULL,
+  tool_name    TEXT NOT NULL DEFAULT '',
+  tool_args    TEXT NOT NULL DEFAULT '',
+  tool_result  TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_traces_session ON agent_traces(session_id, created_at);
 """
 
 

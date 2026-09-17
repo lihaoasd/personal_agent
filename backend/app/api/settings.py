@@ -77,3 +77,22 @@ def test_model(conn: ConnDep):
         "latency_ms": int((time.perf_counter() - t0) * 1000),
         "reply": (reply or "")[:100],
     }
+
+
+@router.get("/chat-mode")
+def get_chat_mode(conn: ConnDep):
+    """获取对话模式：simple（简单模式）或 agent（Agent Loop）。"""
+    from ..db import repos
+    mode = repos.state_get(conn, "chat_mode") or "simple"
+    return {"mode": mode}
+
+
+@router.post("/chat-mode")
+def set_chat_mode(payload: dict, conn: ConnDep):
+    """切换对话模式。"""
+    from ..db import repos
+    mode = payload.get("mode", "simple")
+    if mode not in ("simple", "agent"):
+        raise HTTPException(status_code=400, detail="模式只能是 simple 或 agent")
+    repos.state_set(conn, "chat_mode", mode)
+    return {"mode": mode}

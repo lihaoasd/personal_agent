@@ -66,6 +66,12 @@ def delete_session(session_id: int, conn: ConnDep):
     return {"ok": True}
 
 
+@router.get("/chat/traces")
+def get_traces(session_id: int, limit: int = 100, conn: ConnDep = None):
+    """获取 Agent Loop 的 trace 日志。"""
+    return repos.list_traces(conn, session_id=session_id, limit=limit)
+
+
 @router.post("/checkin/backfill")
 def backfill(payload: BackfillRequest, conn: ConnDep):
     today = date.today()

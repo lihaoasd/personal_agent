@@ -1,6 +1,7 @@
-"""Agent 编排主流程：意图 → 心理学策略 → 业务执行 → 反馈生成。"""
+﻿"""Agent 编排主流程：支持简单模式和 Agent Loop 模式。"""
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from sqlite3 import Connection
 
@@ -9,11 +10,88 @@ from . import extractor, llm, prompts, psychology
 
 SOURCE_BY_INTENT = {"checkin": "chat", "template": "template", "backfill": "backfill"}
 
+# Agent Loop 模式的工具定义
+AGENT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "record_checkin",
+            "description": "记录用户的打卡/事件/运动/阅读等行为",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "记录内容，比如'跑步30分钟'"},
+                    "goal_title": {"type": "string", "description": "关联的目标名称，可选"},
+                    "happened_on": {"type": "string", "description": "日期 YYYY-MM-DD，默认今天"},
+                },
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_goal",
+            "description": "创建新目标",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "目标标题"},
+                    "reason": {"type": "string", "description": "设立目标的初衷/理由"},
+                },
+                "required": ["title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_schedule",
+            "description": "创建日程/安排提醒",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "日程标题"},
+                    "start_at": {"type": "string", "description": "开始时间 ISO 格式"},
+                },
+                "required": ["title", "start_at"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_status",
+            "description": "查询用户的目标进度、打卡记录、日程等数据",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query_type": {
+                        "type": "string",
+                        "enum": ["goals", "checkins", "recent_events", "all"],
+                        "description": "查询类型",
+                    },
+                },
+                "required": ["query_type"],
+            },
+        },
+    },
+]
+
 
 def handle_chat(conn: Connection, message: str, today: date | None = None,
                 session_id: int = 1) -> dict:
-    """处理一条用户消息，返回回复文本与产生的记录。消息落库由本函数负责。"""
+    """处理一条用户消息，根据用户选择的模式走简单模式或 Agent Loop。"""
     today = today or date.today()
+    # 读取用户选择的模式
+    mode = repos.state_get(conn, "chat_mode") or "simple"
+    if mode == "agent":
+        return _handle_agent_loop(conn, message, today, session_id)
+    return _handle_simple(conn, message, today, session_id)
+
+
+def _handle_simple(conn: Connection, message: str, today: date, session_id: int) -> dict:
+    """原来的简单模式：意图分流。"""
     today_str = today.isoformat()
     history = repos.recent_messages(conn, 10, session_id=session_id)
     goals = repos.active_goals(conn)
@@ -26,7 +104,6 @@ def handle_chat(conn: Connection, message: str, today: date | None = None,
         goals=goals, templates=templates, today=today,
     )
     intent = parsed["intent"]
-    # 心理学基调需基于「本次消息之前」的连续中断状态判定
     tone = psychology.decide_tone(conn, today_str, intent)
 
     created_ids: list[int] = []
@@ -45,7 +122,170 @@ def handle_chat(conn: Connection, message: str, today: date | None = None,
 
     repos.insert_message(conn, role="user", content=message, session_id=session_id)
     repos.insert_message(conn, role="assistant", content=reply, session_id=session_id)
-    return {"reply": reply, "created_event_ids": created_ids, "intent": intent}
+    return {"reply": reply, "created_event_ids": created_ids, "intent": intent, "mode": "simple"}
+
+
+def _handle_agent_loop(conn: Connection, message: str, today: date, session_id: int) -> dict:
+    """Agent Loop 模式：模型自己决定调用工具，循环执行。所有过程记录到 trace。"""
+    today_str = today.isoformat()
+    history = repos.recent_messages(conn, 20, session_id=session_id)
+    
+    # 构建 messages
+    system_prompt = prompts.CHAT_SYSTEM + f"\n\n当前时间：{today_str}（{['周一','周二','周三','周四','周五','周六','周日'][today.weekday()]}）"
+    messages = [{"role": "system", "content": system_prompt}]
+    for h in history:
+        messages.append({"role": h["role"], "content": h["content"]})
+    messages.append({"role": "user", "content": message})
+
+    created_ids: list[int] = []
+    max_loops = 5  # 最多循环 5 次，防止死循环
+    step = 0
+
+    # 记录用户消息
+    step += 1
+    repos.insert_trace(
+        conn, session_id=session_id, user_message=message, step=step,
+        role="user", content=message,
+    )
+
+    import time
+    for _ in range(max_loops):
+        step += 1
+        step += 1
+        t0 = time.perf_counter()
+        resp_data = llm.chat_messages(messages, tools=AGENT_TOOLS)
+        elapsed = int((time.perf_counter() - t0) * 1000)
+        resp = resp_data.get("choices", [{}])[0].get("message", {})
+        usage = resp_data.get("usage", {})
+        model_name = resp_data.get("model", "")
+        
+        # 记录模型输出
+        tool_names = ",".join(t["function"]["name"] for t in resp.get("tool_calls", []))
+        extra_info = f"（耗时 {elapsed}ms，模型 {model_name}，tokens: {usage.get('total_tokens', '?')}）"
+        repos.insert_trace(
+            conn, session_id=session_id, user_message=message, step=step,
+            role="assistant", content=resp.get("content", "") + extra_info,
+            tool_name=tool_names,
+        )
+        
+        # 没有工具调用，直接输出回复
+        if not resp.get("tool_calls"):
+            reply = resp.get("content", "")
+            repos.insert_message(conn, role="user", content=message, session_id=session_id)
+            repos.insert_message(conn, role="assistant", content=reply, session_id=session_id)
+            return {"reply": reply, "created_event_ids": created_ids, "intent": "agent_loop", "mode": "agent"}
+
+        # 把 assistant 的工具调用加进 messages
+        messages.append({
+            "role": "assistant",
+            "content": resp.get("content", ""),
+            "tool_calls": resp["tool_calls"],
+        })
+
+        # 执行每个工具调用
+        for tool_call in resp["tool_calls"]:
+            tool_name = tool_call["function"]["name"]
+            args_str = tool_call["function"]["arguments"] or "{}"
+            args = json.loads(args_str)
+            result = _execute_tool(conn, tool_name, args, today)
+            created_ids.extend(result.get("event_ids", []))
+            
+            # 记录工具执行
+            repos.insert_trace(
+                conn, session_id=session_id, user_message=message, step=step,
+                role="tool", content=f"调用工具：{tool_name}",
+                tool_name=tool_name, tool_args=args_str,
+                tool_result=json.dumps(result, ensure_ascii=False),
+            )
+            
+            # 把工具结果加进 messages
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": json.dumps(result, ensure_ascii=False),
+            })
+
+    # 超过最大循环次数，直接问模型要最终回复
+    step += 1
+    messages.append({"role": "user", "content": "请基于以上信息直接回复我。"})
+    t0 = time.perf_counter()
+    resp_data = llm.chat_messages(messages)
+    elapsed = int((time.perf_counter() - t0) * 1000)
+    resp = resp_data.get("choices", [{}])[0].get("message", {})
+    usage = resp_data.get("usage", {})
+    reply = resp.get("content", "好的～")
+    repos.insert_trace(
+        conn, session_id=session_id, user_message=message, step=step,
+        role="assistant", content=f"（超过最大循环次数，耗时 {elapsed}ms，tokens: {usage.get('total_tokens', '?')}）" + reply,
+    )
+    repos.insert_message(conn, role="user", content=message, session_id=session_id)
+    repos.insert_message(conn, role="assistant", content=reply, session_id=session_id)
+    return {"reply": reply, "created_event_ids": created_ids, "intent": "agent_loop", "mode": "agent"}
+
+
+def _execute_tool(conn: Connection, name: str, args: dict, today: date) -> dict:
+    """执行 Agent 工具调用。"""
+    today_str = today.isoformat()
+
+    if name == "record_checkin":
+        content = args.get("content", "")
+        happened_on = args.get("happened_on") or today_str
+        goal_title = args.get("goal_title")
+        goal_id = None
+        # 找目标
+        if goal_title:
+            goals = repos.active_goals(conn)
+            for g in goals:
+                if goal_title in g["title"] or g["title"] in goal_title:
+                    goal_id = g["id"]
+                    break
+        event_id = repos.insert_event(
+            conn, goal_id=goal_id, task_id=None, content=content,
+            event_type=None, amount=None, unit=None,
+            source="chat", happened_on=happened_on,
+        )
+        return {"ok": True, "event_ids": [event_id], "message": f"已记录：{content}"}
+
+    elif name == "create_goal":
+        title = args.get("title", "")
+        reason = args.get("reason", "")
+        gid = repos.insert_goal(conn, title=title, category="general")
+        if reason:
+            # 更新目标理由
+            conn.execute("UPDATE goals SET reason = ? WHERE id = ?", (reason, gid))
+            conn.commit()
+        return {"ok": True, "goal_id": gid, "message": f"已创建目标：{title}"}
+
+    elif name == "create_schedule":
+        title = args.get("title", "")
+        start_at = args.get("start_at", "")
+        sid = repos.insert_schedule(conn, title=title, start_at=start_at)
+        return {"ok": True, "schedule_id": sid, "message": f"已安排日程：{title}"}
+
+    elif name == "query_status":
+        qtype = args.get("query_type", "all")
+        result = {}
+        if qtype in ("goals", "all"):
+            goals = repos.active_goals(conn)
+            goal_list = []
+            for g in goals:
+                p = repos.goal_progress(conn, g["id"])
+                goal_list.append({
+                    "title": g["title"],
+                    "status": g["status"],
+                    "progress": f"{p['done_tasks']}/{p['total_tasks']}",
+                })
+            result["goals"] = goal_list
+        if qtype in ("checkins", "all"):
+            week_start = today - timedelta(days=today.weekday())
+            days = repos.distinct_days_between(conn, week_start.isoformat(), today_str)
+            result["week_checkin_days"] = days
+        if qtype in ("recent_events", "all"):
+            recent = repos.recent_events(conn, 5)
+            result["recent_events"] = [{"content": e["content"], "date": e["happened_on"]} for e in recent]
+        return {"ok": True, "data": result}
+
+    return {"ok": False, "message": f"未知工具：{name}"}
 
 
 def _handle_record(conn: Connection, message: str, parsed: dict, today: date,

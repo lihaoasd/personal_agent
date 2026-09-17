@@ -1,4 +1,4 @@
-"""数据访问层：所有 SQL 集中在仓储函数中，函数接收连接作为首个参数。"""
+﻿"""数据访问层：所有 SQL 集中在仓储函数中，函数接收连接作为首个参数。"""
 from __future__ import annotations
 
 import json
@@ -378,3 +378,23 @@ def state_set(conn: Connection, key: str, value: str) -> None:
         "INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         (key, value, _now_iso()))
+
+
+# ---------- agent traces ----------
+
+def insert_trace(conn: Connection, *, session_id: int, user_message: str,
+                 step: int, role: str, content: str,
+                 tool_name: str = "", tool_args: str = "", tool_result: str = "") -> int:
+    cur = conn.execute(
+        "INSERT INTO agent_traces (session_id, user_message, step, role, content, "
+        "tool_name, tool_args, tool_result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (session_id, user_message, step, role, content, tool_name, tool_args, tool_result, _now_iso()),
+    )
+    return cur.lastrowid
+
+
+def list_traces(conn: Connection, session_id: int, limit: int = 200) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM agent_traces WHERE session_id = ? ORDER BY id ASC LIMIT ?",
+        (session_id, limit)).fetchall()
+    return [dict(r) for r in rows]

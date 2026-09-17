@@ -1,8 +1,8 @@
-"""LLM 提供商：OpenAI 兼容 Chat Completions；支持注入替身用于测试。"""
+﻿"""LLM 提供商：OpenAI 兼容 Chat Completions；支持多轮消息和 function calling。"""
 from __future__ import annotations
 
 import json
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 
@@ -13,6 +13,7 @@ class LLMError(Exception):
 
 class Provider(Protocol):
     def chat(self, *, system: str, user: str, json_mode: bool = False) -> str: ...
+    def chat_messages(self, messages: list[dict[str, Any]], tools: list[dict] | None = None) -> dict: ...
 
 
 class OpenAICompatProvider:
@@ -45,6 +46,30 @@ class OpenAICompatProvider:
         if resp.status_code != 200:
             raise LLMError(f"LLM 返回 {resp.status_code}: {resp.text[:200]}")
         return resp.json()["choices"][0]["message"]["content"]
+
+    def chat_messages(self, messages: list[dict[str, Any]], tools: list[dict] | None = None) -> dict:
+        """多轮对话，支持 function calling。返回完整 message 对象。"""
+        if not self.api_key:
+            raise LLMError("未配置 LLM API Key（OPENAI_API_KEY）")
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.3,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        resp = httpx.post(
+            f"{self.base_url}/chat/completions",
+            json=payload,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout=60,
+        )
+        if resp.status_code != 200:
+            raise LLMError(f"LLM 返回 {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        # 返回完整 data，包含 choices[0].message 和 usage
+        return data
 
 
 _provider: Provider | None = None
@@ -82,3 +107,8 @@ def chat_json(system: str, user: str) -> dict:
 
 def chat_text(system: str, user: str) -> str:
     return _current().chat(system=system, user=user)
+
+
+def chat_messages(messages: list[dict[str, Any]], tools: list[dict] | None = None) -> dict:
+    """多轮对话，支持 function calling。"""
+    return _current().chat_messages(messages, tools=tools)

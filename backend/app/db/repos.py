@@ -320,20 +320,25 @@ def create_session(conn: Connection) -> int:
 
 # ---------- reviews ----------
 
-def insert_review(conn: Connection, *, period_type: str, period_start: str, period_end: str,
+def insert_review(conn: Connection, *, title: str = "", period_type: str, period_start: str, period_end: str,
                   content: str, stats: dict) -> int:
     cur = conn.execute(
-        "INSERT INTO reviews (period_type, period_start, period_end, content, stats_json, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (period_type, period_start, period_end, content, json.dumps(stats, ensure_ascii=False), _now_iso()),
+        "INSERT INTO reviews (title, period_type, period_start, period_end, content, stats_json, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (title, period_type, period_start, period_end, content, json.dumps(stats, ensure_ascii=False), _now_iso()),
     )
     return cur.lastrowid
 
 
-def list_reviews(conn: Connection, period_type: str = "weekly", limit: int = 10) -> list[dict]:
-    rows = conn.execute(
-        "SELECT * FROM reviews WHERE period_type = ? ORDER BY period_start DESC LIMIT ?",
-        (period_type, limit)).fetchall()
+def list_reviews(conn: Connection, period_type: str = "all", limit: int = 50) -> list[dict]:
+    if period_type == "all":
+        rows = conn.execute(
+            "SELECT * FROM reviews ORDER BY created_at DESC, period_start DESC LIMIT ?",
+            (limit,)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM reviews WHERE period_type = ? ORDER BY created_at DESC, period_start DESC LIMIT ?",
+            (period_type, limit)).fetchall()
     out = []
     for r in rows:
         item = dict(r)

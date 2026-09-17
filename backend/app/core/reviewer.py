@@ -55,7 +55,28 @@ def generate_review(conn: Connection, *, period_start: str | None = None,
     stats["period_start"], stats["period_end"] = start, end
     framing = psychology.review_framing(stats)
     content = llm.chat_text(prompts.REVIEW_SYSTEM, prompts.build_review_user(stats, framing))
-    review_id = repos.insert_review(conn, period_type="weekly", period_start=start,
+    # AI 生成总结性标题
+    title = generate_review_title(content, start, end)
+    review_id = repos.insert_review(conn, title=title, period_type="weekly", period_start=start,
                                     period_end=end, content=content, stats=stats)
-    return {"id": review_id, "period_start": start, "period_end": end,
+    return {"id": review_id, "title": title, "period_start": start, "period_end": end,
             "content": content, "stats": stats}
+
+
+def generate_review_title(content: str, start: str, end: str) -> str:
+    """让 AI 从复盘内容生成一个总结性标题。"""
+    try:
+        prompt = f"""从下面这篇周复盘里，提取一个简短的总结性标题（15字以内），不要带标点，概括这周的核心状态。
+直接输出标题，不要其他内容。
+
+复盘内容：
+{content[:500]}"""
+        title = llm.chat_text("你是一个标题生成助手，只输出标题文字。", prompt).strip()
+        # 清理引号和换行
+        title = title.strip('"\'""''').split('\n')[0].strip()
+        if title and len(title) <= 25:
+            return title
+    except Exception:
+        pass
+    # 兜底：取时间范围
+    return f"{start} ~ {end}"

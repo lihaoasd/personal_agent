@@ -9,8 +9,10 @@ CREATE TABLE IF NOT EXISTS goals (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   title       TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
+  reason      TEXT NOT NULL DEFAULT '',
   category    TEXT NOT NULL DEFAULT 'general',
   status      TEXT NOT NULL DEFAULT 'active',
+  abandon_reason TEXT NOT NULL DEFAULT '',
   target_date TEXT,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
@@ -85,6 +87,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 
 CREATE TABLE IF NOT EXISTS reviews (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  title        TEXT NOT NULL DEFAULT '',
   period_type  TEXT NOT NULL,
   period_start TEXT NOT NULL,
   period_end   TEXT NOT NULL,
@@ -141,4 +144,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE schedules ADD COLUMN note TEXT NOT NULL DEFAULT ''")
     if "duration_min" not in sched_cols:
         conn.execute("ALTER TABLE schedules ADD COLUMN duration_min INTEGER NOT NULL DEFAULT 30")
+    # 迁移：goals 加 abandon_reason
+    goal_cols = [r[1] for r in conn.execute("PRAGMA table_info(goals)").fetchall()]
+    if "abandon_reason" not in goal_cols:
+        conn.execute("ALTER TABLE goals ADD COLUMN abandon_reason TEXT NOT NULL DEFAULT ''")
+    # 迁移：reviews 加 title
+    review_cols = [r[1] for r in conn.execute("PRAGMA table_info(reviews)").fetchall()]
+    if "title" not in review_cols:
+        conn.execute("ALTER TABLE reviews ADD COLUMN title TEXT NOT NULL DEFAULT ''")
     conn.commit()

@@ -36,6 +36,7 @@ class GoalUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     reason: Optional[str] = None
+    abandon_reason: Optional[str] = None
     category: Optional[GoalCategory] = None
     status: Optional[GoalStatus] = None
     target_date: Optional[str] = None
@@ -97,3 +98,9 @@ class ModelConfigRequest(BaseModel):
 class ReviewGenerateRequest(BaseModel):
     period_start: Optional[str] = None
     period_end: Optional[str] = None
+
+
+class ReviewCreateRequest(BaseModel):
+    period_start: str
+    period_end: str
+    content: str

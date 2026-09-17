@@ -1,0 +1,131 @@
+:root {
+  --el-color-primary: #7bc8a4;
+  --el-color-primary-light-3: #9dd8ba;
+  --el-color-primary-light-5: #bfe5cf;
+  --el-color-primary-light-7: #d7f0e2;
+  --el-color-primary-light-8: #e4f5eb;
+  --el-color-primary-light-9: #f0f9f4;
+  --el-color-primary-dark-2: #5fb38e;
+
+  --page-bg: #fff9f2;
+  --sidebar-bg: #fffcf7;
+  --card-bg: #ffffff;
+  --text-primary: #4a4a4a;
+  --text-secondary: #9a9a9a;
+  --border-soft: #f0ebe3;
+  --radius-card: 20px;
+  --radius-sm: 14px;
+  --shadow-soft: 0 2px 12px rgba(180, 160, 130, 0.08);
+  --pink: #ffb5c5;
+  --peach: #ffd4a3;
+  --mint: #b8e6d0;
+  --lavender: #d4c5f0;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  background: var(--page-bg);
+  font-family: 'Quicksand', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    -apple-system, sans-serif;
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+  box-sizing: border-box;
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 4px;
+  color: var(--text-primary);
+}
+
+.page-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+
+.card {
+  background: var(--card-bg);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-soft);
+  padding: 18px 20px;
+  box-sizing: border-box;
+}
+
+/* ===== 萌系确认弹窗 ===== */
+.el-message-box {
+  border-radius: 20px !important;
+  border: 1px solid var(--border-soft) !important;
+  padding: 24px 28px !important;
+  box-shadow: 0 12px 40px rgba(180, 160, 130, 0.18) !important;
+  background: #fff !important;
+}
+.el-message-box__title {
+  font-weight: 700 !important;
+  font-size: 17px !important;
+  color: var(--text-primary) !important;
+}
+.el-message-box__content {
+  padding: 16px 0 !important;
+  color: var(--text-primary) !important;
+  font-size: 14px !important;
+  line-height: 1.7 !important;
+}
+.el-message-box__status {
+  border-radius: 50% !important;
+  background: linear-gradient(135deg, #fff0f3, #ffe0e6) !important;
+  border: none !important;
+  color: #e8789a !important;
+  width: 36px !important;
+  height: 36px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+}
+.el-message-box__status .el-icon {
+  color: #e8789a !important;
+  font-size: 18px !important;
+}
+.el-message-box__btns {
+  padding-top: 8px !important;
+}
+.el-message-box__btns .el-button {
+  border-radius: 14px !important;
+  padding: 9px 22px !important;
+  font-weight: 600 !important;
+  border: none !important;
+}
+.el-message-box__btns .el-button--default {
+  background: #f5f0e8 !important;
+  color: var(--text-secondary) !important;
+}
+.el-message-box__btns .el-button--default:hover {
+  background: #ede6da !important;
+}
+.el-message-box__btns .el-button--primary {
+  background: linear-gradient(135deg, #ffb5c5, #ff9eb5) !important;
+  color: #8b3a5a !important;
+}
+.el-message-box__btns .el-button--primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 158, 181, 0.4) !important;
+}
+
+/* ===== 萌系消息提示 ===== */
+.el-message {
+  border-radius: 16px !important;
+  border: 1px solid var(--border-soft) !important;
+  padding: 12px 20px !important;
+  font-size: 13.5px !important;
+}

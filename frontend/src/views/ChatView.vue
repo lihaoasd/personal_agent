@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import client from '../api/client'
 
@@ -17,6 +17,13 @@ const sessions = ref<any[]>([])
 const editingSessionId = ref<number | null>(null)
 const editTitleInput = ref('')
 const deletingSessionId = ref<number | null>(null)
+const traceVisible = ref(false)
+const traceData = ref<any[]>([])
+const traceLoading = ref(false)
+const traceTitle = ref('')
+const activeSteps = ref<number[]>([])
+const traceUserMessage = ref('')
+const activeStepId = ref<number | null>(null)
 
 let pollTimer: number | undefined
 let notifiedToday = false
@@ -124,6 +131,43 @@ function deleteSession(s: any, e: Event) {
     }
     loadSessions()
   })
+}
+
+async function openTrace(sessionId: number) {
+  traceLoading.value = true
+  traceVisible.value = true
+  traceTitle.value = 'Trace 日志'
+  activeStepId.value = null
+  try {
+    const { data } = await client.get('/chat/traces', { params: { session_id: sessionId } })
+    traceData.value = data
+    // 默认选中第一步
+    if (data.length) activeStepId.value = data[0].id
+    // 取第一条的 user_message
+    if (data.length) traceUserMessage.value = data[0].user_message
+  } catch {
+    traceData.value = []
+  } finally {
+    traceLoading.value = false
+  }
+}
+
+import { computed } from 'vue'
+
+const currentStep = computed(() => traceData.value.find(t => t.id === activeStepId.value))
+
+function formatShortTime(iso: string) {
+  // "2026-09-17T14:30:25.123" -> "14:30:25"
+  if (!iso) return ''
+  return iso.split('T')[1]?.slice(0, 8) || iso
+}
+
+function formatJson(str: string) {
+  try {
+    return JSON.stringify(JSON.parse(str), null, 2)
+  } catch {
+    return str
+  }
 }
 
 async function loadTemplates() {
@@ -240,6 +284,7 @@ onUnmounted(() => window.clearInterval(pollTimer))
               <div class="session-title">
                 {{ s.title }}
                 <span class="edit-icon" @click.stop="startEditTitle(s)">✏️</span>
+                <span class="trace-icon" @click.stop="openTrace(s.id)">🔍</span>
                 <span
                   v-if="deletingSessionId === s.id"
                   class="delete-confirm"
@@ -330,6 +375,93 @@ onUnmounted(() => window.clearInterval(pollTimer))
         <button class="send-btn" :disabled="sending" @click="send()">
           {{ sending ? '…' : '发送 🚀' }}
         </button>
+      </div>
+    </div>
+
+    <!-- Trace 页面视图（替换整个聊天区） -->
+    <div v-if="traceVisible" class="trace-page">
+      <div class="trace-page-head">
+        <button class="back-btn" @click="traceVisible = false">← 返回对话</button>
+        <h2 class="trace-title">🔍 Agent Trace 日志</h2>
+        <span class="trace-user">用户消息：{{ traceUserMessage }}</span>
+      </div>
+
+      <div v-loading="traceLoading" class="trace-body">
+        <div v-if="!traceData.length" class="trace-empty">
+          <div class="empty-emoji">📋</div>
+          <div>这个会话还没有 Agent Trace 记录</div>
+          <div class="empty-hint">切到 Agent Loop 模式对话后，这里会显示执行过程</div>
+        </div>
+
+        <template v-else>
+          <!-- 左边：步骤表格列表 -->
+          <div class="trace-sidebar">
+            <table class="trace-table">
+              <thead>
+                <tr>
+                  <th class="col-step">#</th>
+                  <th class="col-role">角色</th>
+                  <th class="col-content">摘要</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="t in traceData"
+                  :key="t.id"
+                  class="trace-row"
+                  :class="{ active: t.id === activeStepId }"
+                  @click="activeStepId = t.id"
+                >
+                  <td class="col-step">
+                    <span class="step-num">{{ t.step }}</span>
+                  </td>
+                  <td class="col-role">
+                    <span class="role-badge" :class="t.role">
+                      {{ t.role === 'user' ? '👤' : t.role === 'assistant' ? '🤖' : '🔧' }}
+                    </span>
+                  </td>
+                  <td class="col-content">
+                    <div class="content-text">
+                      {{ t.tool_name ? t.tool_name : (t.content || '').slice(0, 20) }}
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 右边：详情 -->
+          <div class="trace-detail">
+            <div v-if="currentStep" class="detail-card">
+              <div class="detail-head">
+                <span class="role-badge" :class="currentStep.role">
+                  {{ currentStep.role === 'user' ? '👤 用户消息' : currentStep.role === 'assistant' ? '🤖 模型输出' : '🔧 工具调用' }}
+                </span>
+                <span class="detail-step">Step {{ currentStep.step }}</span>
+                <span class="detail-time">{{ currentStep.created_at }}</span>
+              </div>
+
+              <div v-if="currentStep.content" class="detail-row">
+                <div class="detail-label">📝 完整内容</div>
+                <div class="detail-content">{{ currentStep.content }}</div>
+              </div>
+              <div v-if="currentStep.tool_name" class="detail-row">
+                <div class="detail-label">🔧 调用工具</div>
+                <div class="detail-content">
+                  <code class="tool-name">{{ currentStep.tool_name }}</code>
+                </div>
+              </div>
+              <div v-if="currentStep.tool_args" class="detail-row">
+                <div class="detail-label">📥 输入参数</div>
+                <pre class="detail-json">{{ formatJson(currentStep.tool_args) }}</pre>
+              </div>
+              <div v-if="currentStep.tool_result" class="detail-row">
+                <div class="detail-label">📤 返回结果</div>
+                <pre class="detail-json">{{ formatJson(currentStep.tool_result) }}</pre>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -517,6 +649,16 @@ onUnmounted(() => window.clearInterval(pollTimer))
   transition: opacity 0.15s;
   cursor: pointer;
 }
+.trace-icon {
+  margin-left: 6px;
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 13px;
+  transition: opacity 0.15s;
+}
+.trace-icon:hover {
+  opacity: 1;
+}
 .delete-icon {
   font-size: 11px;
   opacity: 0;
@@ -524,7 +666,17 @@ onUnmounted(() => window.clearInterval(pollTimer))
   cursor: pointer;
 }
 .session-item:hover .edit-icon,
-.session-item:hover .delete-icon {
+.session-item:hover .trace-icon {
+  margin-left: 6px;
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 13px;
+  transition: opacity 0.15s;
+}
+.trace-icon:hover {
+  opacity: 1;
+}
+.delete-icon {
   opacity: 0.6;
 }
 .delete-icon:hover {
@@ -775,5 +927,232 @@ onUnmounted(() => window.clearInterval(pollTimer))
 .send-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+/* Trace 页面样式 */
+.trace-page {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(180deg, #fff9f2 0%, #fff5eb 100%);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.trace-page-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 32px;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+.back-btn {
+  padding: 9px 18px;
+  border-radius: 16px;
+  border: 1px solid #e8e0d5;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #8a7a6a;
+  transition: all 0.15s;
+}
+.back-btn:hover {
+  background: #faf3ea;
+  transform: translateX(-2px);
+}
+.trace-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #5a4a3a;
+  margin: 0;
+}
+.trace-user {
+  margin-left: auto;
+  font-size: 13px;
+  color: #a09080;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #fff;
+  padding: 6px 14px;
+  border-radius: 12px;
+  border: 1px solid #f0e8dc;
+}
+
+/* 左右分栏 + 左边表格 */
+.trace-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+.trace-sidebar {
+  flex: 3;
+  overflow-y: auto;
+  padding: 16px;
+  border-right: 1px solid rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.3);
+}
+.trace-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #fff;
+  border: 1px solid #f0e8dc;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.trace-table thead th {
+  background: #faf6f0;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #a09080;
+  border-bottom: 1px solid #f0e8dc;
+}
+.trace-table tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f8f2ea;
+  font-size: 12.5px;
+  vertical-align: middle;
+}
+.trace-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.trace-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.trace-row:hover {
+  background: #faf6f0;
+}
+.trace-row.active {
+  background: #f5f0ff;
+}
+.col-step {
+  width: 36px;
+}
+.col-role {
+  width: 40px;
+}
+.step-num {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #8a7a6a;
+  background: #f5f0e8;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.role-badge {
+  display: inline-block;
+  font-size: 14px;
+}
+.role-badge.user { color: #4a6a9a; }
+.role-badge.assistant { color: #5a4a8a; }
+.role-badge.tool { color: #3d8b6a; }
+.content-text {
+  color: #5a4a3a;
+  line-height: 1.4;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 右边详情 */
+.trace-detail {
+  flex: 7;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px;
+}
+.detail-card {
+  background: #fff;
+  border: 1px solid #f0e8dc;
+  border-radius: 20px;
+  padding: 24px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: break-word;
+}
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px dashed #f0e8dc;
+}
+.detail-step {
+  font-size: 13px;
+  font-weight: 700;
+  color: #5a4a3a;
+}
+.detail-time {
+  font-size: 12px;
+  color: #c8bcac;
+  margin-left: auto;
+}
+.detail-row {
+  margin-bottom: 18px;
+}
+.detail-row:last-child {
+  margin-bottom: 0;
+}
+.detail-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #a09080;
+  margin-bottom: 8px;
+}
+.detail-content {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #5a4a3a;
+  background: #faf6f0;
+  padding: 14px 18px;
+  border-radius: 14px;
+  white-space: pre-wrap;
+}
+.tool-name {
+  font-size: 13.5px;
+  background: linear-gradient(135deg, #e8f7f0, #d4f0e2);
+  color: #3d8b6a;
+  padding: 5px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.detail-json {
+  font-size: 12.5px;
+  background: #2d2a3a;
+  color: #e0d8f0;
+  border-radius: 14px;
+  padding: 16px 18px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-width: 100%;
+  line-height: 1.7;
+  margin: 0;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.trace-empty {
+  text-align: center;
+  padding: 80px 20px;
+  color: #a09080;
+  width: 100%;
+}
+.trace-empty .empty-emoji {
+  font-size: 56px;
+  margin-bottom: 16px;
+}
+.trace-empty .empty-hint {
+  font-size: 13px;
+  margin-top: 10px;
+  color: #c8bcac;
 }
 </style>

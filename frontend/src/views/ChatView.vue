@@ -9,16 +9,20 @@ const sending = ref(false)
 const weekDays = ref(0)
 const todayDone = ref(false)
 const listRef = ref<HTMLElement>()
-const currentSessionId = ref(1)
+const currentSessionId = ref<number | null>(null)
 const loadingMore = ref(false)
 const hasMore = ref(true)
 const showSessions = ref(false)
 const sessions = ref<any[]>([])
+const editingSessionId = ref<number | null>(null)
+const editTitleInput = ref('')
+const deletingSessionId = ref<number | null>(null)
 
 let pollTimer: number | undefined
 let notifiedToday = false
 
 async function loadMessages(initial = true) {
+  if (!currentSessionId.value) return
   if (initial) {
     // 初始加载最新 50 条
     const { data } = await client.get('/chat/messages', {
@@ -69,11 +73,10 @@ async function loadSessions() {
 }
 
 async function newChat() {
-  const { data } = await client.post('/chat/new')
-  currentSessionId.value = data.session_id
+  // 只重置前端状态，不创建会话，等发第一条消息时才创建
+  currentSessionId.value = null
   messages.value = []
   hasMore.value = true
-  await loadSessions()
 }
 
 async function switchSession(id: number) {
@@ -81,6 +84,46 @@ async function switchSession(id: number) {
   showSessions.value = false
   hasMore.value = true
   await loadMessages(true)
+}
+
+function startEditTitle(s: any) {
+  editingSessionId.value = s.id
+  editTitleInput.value = s.title
+}
+
+async function saveTitle(s: any) {
+  const newTitle = editTitleInput.value.trim()
+  if (newTitle && newTitle !== s.title) {
+    await client.patch(`/chat/sessions/${s.id}`, { title: newTitle })
+    s.title = newTitle
+  }
+  editingSessionId.value = null
+}
+
+function cancelEditTitle() {
+  editingSessionId.value = null
+}
+
+function deleteSession(s: any, e: Event) {
+  e.stopPropagation()
+  // 第一次点：进入确认状态
+  if (deletingSessionId.value !== s.id) {
+    deletingSessionId.value = s.id
+    // 3 秒后自动取消
+    setTimeout(() => {
+      if (deletingSessionId.value === s.id) deletingSessionId.value = null
+    }, 3000)
+    return
+  }
+  // 第二次点：确认删除
+  deletingSessionId.value = null
+  client.delete(`/chat/sessions/${s.id}`).then(() => {
+    if (currentSessionId.value === s.id) {
+      currentSessionId.value = null
+      messages.value = []
+    }
+    loadSessions()
+  })
 }
 
 async function loadTemplates() {
@@ -105,6 +148,14 @@ async function send(text?: string) {
   if (!content || sending.value) return
   input.value = ''
   sending.value = true
+
+  // 如果还没创建会话，发第一条消息时才创建
+  if (!currentSessionId.value) {
+    const { data: newSess } = await client.post('/chat/new')
+    currentSessionId.value = newSess.session_id
+    await loadSessions()
+  }
+
   messages.value.push({ role: 'user', content, id: Date.now(), display: content })
   scrollBottom()
   try {
@@ -148,7 +199,7 @@ onMounted(async () => {
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission()
   }
-  await Promise.all([loadMessages(), loadTemplates(), checkStatus(), loadSessions()])
+  await Promise.all([loadTemplates(), checkStatus(), loadSessions()])
   pollTimer = window.setInterval(checkStatus, 60000)
 })
 
@@ -173,16 +224,44 @@ onUnmounted(() => window.clearInterval(pollTimer))
             :class="{ active: s.id === currentSessionId }"
             @click="switchSession(s.id)"
           >
-            <div class="session-time">{{ formatTime(s.created_at) }}</div>
-            <div class="session-preview">{{ s.last_message || '空对话' }}</div>
-            <div class="session-count">{{ s.msg_count }} 条消息</div>
+            <!-- 编辑状态 -->
+            <div v-if="editingSessionId === s.id" class="session-edit" @click.stop>
+              <input
+                v-model="editTitleInput"
+                class="edit-input"
+                @keyup.enter="saveTitle(s)"
+                @keyup.esc="cancelEditTitle"
+                autofocus
+              />
+              <button class="edit-save" @click="saveTitle(s)">✓</button>
+            </div>
+            <!-- 正常状态 -->
+            <template v-else>
+              <div class="session-title">
+                {{ s.title }}
+                <span class="edit-icon" @click.stop="startEditTitle(s)">✏️</span>
+                <span
+                  v-if="deletingSessionId === s.id"
+                  class="delete-confirm"
+                  @click.stop="deleteSession(s, $event)"
+                >确认删除？</span>
+                <span
+                  v-else
+                  class="delete-icon"
+                  @click.stop="deleteSession(s, $event)"
+                >🗑️</span>
+              </div>
+              <div class="session-meta">
+                <span class="session-time">{{ formatTime(s.created_at) }}</span>
+                <span class="session-count">{{ s.msg_count }} 条</span>
+              </div>
+            </template>
           </div>
         </div>
       </div>
     </div>
 
     <div class="chat-meta">
-      <button class="menu-btn" @click="showSessions = true">☰</button>
       <div class="meta-chip" :class="{ done: todayDone }">
         <span class="chip-emoji">{{ todayDone ? '✅' : '🌙' }}</span>
         {{ todayDone ? '今日已记录' : '今日还没记录哦' }}
@@ -193,6 +272,7 @@ onUnmounted(() => window.clearInterval(pollTimer))
       </div>
       <div class="meta-actions">
         <button class="new-chat-btn" @click="newChat">＋ 新对话</button>
+        <button class="menu-btn" @click="showSessions = true">☰</button>
       </div>
     </div>
 
@@ -208,7 +288,15 @@ onUnmounted(() => window.clearInterval(pollTimer))
         —— 已经到底啦 ——
       </div>
 
-      <div v-if="!messages.length" class="chat-empty">
+      <!-- 没选会话时的引导 -->
+      <div v-if="!currentSessionId" class="chat-empty">
+        <div class="empty-emoji">🌱</div>
+        <div class="empty-text">开始一段新的成长对话吧</div>
+        <div class="empty-hint">点右上角「＋ 新对话」开始，或点「☰」看历史记录</div>
+      </div>
+
+      <!-- 有会话但没消息 -->
+      <div v-else-if="!messages.length" class="chat-empty">
         <div class="empty-emoji">🌸</div>
         <div class="empty-text">和我说说今天做了什么吧</div>
         <div class="empty-hint">比如「今天读了 30 页书」「明天下午 3 点健身」</div>
@@ -235,7 +323,7 @@ onUnmounted(() => window.clearInterval(pollTimer))
       <div class="input-row">
         <el-input
           v-model="input"
-          placeholder="记录今天 / 问进度 / 安排日程…"
+          :placeholder="currentSessionId ? '记录今天 / 问进度 / 安排日程…' : '说点什么开始新对话吧…'"
           :disabled="sending"
           @keyup.enter="send()"
         />
@@ -341,19 +429,19 @@ onUnmounted(() => window.clearInterval(pollTimer))
 .sessions-panel {
   position: absolute;
   top: 16px;
-  left: 16px;
+  right: 16px;
   bottom: 16px;
   width: 300px;
   background: #fffcf7;
   border-radius: 20px;
-  box-shadow: 0 8px 32px rgba(180, 160, 130, 0.15);
+  box-shadow: -8px 0 32px rgba(180, 160, 130, 0.15);
   display: flex;
   flex-direction: column;
-  animation: slide-in 0.25s ease;
+  animation: slide-in-right 0.25s ease;
   overflow: hidden;
 }
-@keyframes slide-in {
-  from { transform: translateX(-100%); opacity: 0; }
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
 .sessions-header {
@@ -414,19 +502,89 @@ onUnmounted(() => window.clearInterval(pollTimer))
   background: #f0faf4;
   border-color: #c8e6d5;
 }
+.session-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.edit-icon {
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: pointer;
+}
+.delete-icon {
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: pointer;
+}
+.session-item:hover .edit-icon,
+.session-item:hover .delete-icon {
+  opacity: 0.6;
+}
+.delete-icon:hover {
+  opacity: 1 !important;
+}
+.delete-confirm {
+  font-size: 11px;
+  color: #e07a7a;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: #fef0f0;
+  white-space: nowrap;
+  animation: pulse 1s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.session-edit {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.edit-input {
+  flex: 1;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid #c8e6d5;
+  background: #fff;
+  font-size: 13px;
+  outline: none;
+}
+.edit-input:focus {
+  border-color: #7bc8a4;
+}
+.edit-save {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: none;
+  background: #7bc8a4;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.session-meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
 .session-time {
   font-size: 11.5px;
   color: var(--text-secondary);
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.session-preview {
-  font-size: 13px;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 4px;
+  font-weight: 500;
 }
 .session-count {
   font-size: 11px;

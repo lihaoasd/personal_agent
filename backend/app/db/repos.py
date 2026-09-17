@@ -192,12 +192,13 @@ def count_events(conn: Connection) -> int:
 # ---------- schedules ----------
 
 def insert_schedule(conn: Connection, *, title: str, start_at: str, end_at: str | None = None,
+                    note: str = '', duration_min: int = 30,
                     goal_id: int | None = None, task_id: int | None = None,
                     remind_at: str | None = None) -> int:
     cur = conn.execute(
-        "INSERT INTO schedules (title, start_at, end_at, goal_id, task_id, remind_at, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (title, start_at, end_at, goal_id, task_id, remind_at, _now_iso()),
+        "INSERT INTO schedules (title, start_at, end_at, note, duration_min, goal_id, task_id, remind_at, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (title, start_at, end_at, note, duration_min, goal_id, task_id, remind_at, _now_iso()),
     )
     return cur.lastrowid
 
@@ -212,13 +213,18 @@ def list_schedules_between(conn: Connection, start: str, end: str) -> list[dict]
 
 
 def update_schedule(conn: Connection, schedule_id: int, **fields) -> dict | None:
-    allowed = {"title", "start_at", "end_at", "remind_at", "status"}
+    allowed = {"title", "start_at", "end_at", "remind_at", "status", "note", "duration_min"}
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if not updates:
         return get_schedule(conn, schedule_id)
     sets = ", ".join(f"{k} = ?" for k in updates)
     conn.execute(f"UPDATE schedules SET {sets} WHERE id = ?", (*updates.values(), schedule_id))
     return get_schedule(conn, schedule_id)
+
+
+def delete_schedule(conn: Connection, schedule_id: int) -> bool:
+    cur = conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+    return cur.rowcount > 0
 
 
 # ---------- quick templates ----------
@@ -272,20 +278,37 @@ def list_messages(conn: Connection, limit: int = 50, session_id: int = 1,
     return [dict(r) for r in rows]
 
 
-def list_sessions(conn: Connection) -> list[dict]:
-    """获取所有会话列表（按最新消息时间倒序）。"""
+def list_sessions(conn: Connection, limit: int = 500) -> list[dict]:
+    """获取所有会话列表（按最新消息时间倒序），标题优先用用户自定义，否则取第一条用户消息前 20 字。"""
     rows = conn.execute("""
-        SELECT s.id, s.created_at,
+        SELECT s.id, s.title, s.created_at,
+               (SELECT content FROM chat_messages WHERE session_id = s.id AND role = 'user' ORDER BY id LIMIT 1) as first_user_msg,
                (SELECT content FROM chat_messages WHERE session_id = s.id ORDER BY id DESC LIMIT 1) as last_message,
                (SELECT COUNT(*) FROM chat_messages WHERE session_id = s.id) as msg_count
-        FROM (
-            SELECT DISTINCT session_id as id, MIN(created_at) as created_at
-            FROM chat_messages
-            GROUP BY session_id
-        ) s
+        FROM chat_sessions s
         ORDER BY s.created_at DESC
-    """).fetchall()
-    return [dict(r) for r in rows]
+        LIMIT ?
+    """, (limit,)).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        # 优先用用户自定义标题，否则用第一条用户消息
+        if not d.get('title'):
+            first_msg = d.get('first_user_msg') or ''
+            d['title'] = first_msg[:20] if first_msg else '新对话'
+        result.append(d)
+    return result
+
+
+def update_session_title(conn: Connection, session_id: int, title: str) -> None:
+    """更新会话标题。"""
+    conn.execute("UPDATE chat_sessions SET title = ? WHERE id = ?", (title, session_id))
+
+
+def delete_session(conn: Connection, session_id: int) -> None:
+    """删除会话及其所有消息。"""
+    conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+    conn.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
 
 
 def create_session(conn: Connection) -> int:

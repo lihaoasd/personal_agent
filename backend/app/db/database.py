@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS schedules (
   title       TEXT NOT NULL,
   start_at    TEXT NOT NULL,
   end_at      TEXT,
+  note        TEXT NOT NULL DEFAULT '',
+  duration_min INTEGER NOT NULL DEFAULT 30,
   goal_id     INTEGER REFERENCES goals(id) ON DELETE SET NULL,
   task_id     INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
   remind_at   TEXT,
@@ -77,6 +79,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 
 CREATE TABLE IF NOT EXISTS chat_sessions (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  title      TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
 
@@ -128,4 +131,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
     msg_cols = [r[1] for r in conn.execute("PRAGMA table_info(chat_messages)").fetchall()]
     if "session_id" not in msg_cols:
         conn.execute("ALTER TABLE chat_messages ADD COLUMN session_id INTEGER NOT NULL DEFAULT 1")
+    # 迁移：chat_sessions 加 title
+    sess_cols = [r[1] for r in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()]
+    if "title" not in sess_cols:
+        conn.execute("ALTER TABLE chat_sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+    # 迁移：schedules 加 note 和 duration_min
+    sched_cols = [r[1] for r in conn.execute("PRAGMA table_info(schedules)").fetchall()]
+    if "note" not in sched_cols:
+        conn.execute("ALTER TABLE schedules ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+    if "duration_min" not in sched_cols:
+        conn.execute("ALTER TABLE schedules ADD COLUMN duration_min INTEGER NOT NULL DEFAULT 30")
     conn.commit()

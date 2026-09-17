@@ -27,6 +27,7 @@ def create_schedule(payload: ScheduleCreate, conn: ConnDep):
         raise HTTPException(status_code=404, detail="目标不存在")
     schedule_id = repos.insert_schedule(
         conn, title=payload.title, start_at=payload.start_at, end_at=payload.end_at,
+        note=payload.note or '', duration_min=payload.duration_min or 30,
         goal_id=payload.goal_id, task_id=payload.task_id, remind_at=payload.remind_at,
     )
     return repos.get_schedule(conn, schedule_id)
@@ -38,3 +39,10 @@ def update_schedule(schedule_id: int, payload: ScheduleUpdate, conn: ConnDep):
     if schedule is None:
         raise HTTPException(status_code=404, detail="日程不存在")
     return schedule
+
+
+@router.delete("/{schedule_id}")
+def delete_schedule(schedule_id: int, conn: ConnDep):
+    if not repos.delete_schedule(conn, schedule_id):
+        raise HTTPException(status_code=404, detail="日程不存在")
+    return {"ok": True}

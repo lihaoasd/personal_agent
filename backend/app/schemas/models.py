@@ -56,6 +56,8 @@ class ScheduleCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     start_at: str
     end_at: Optional[str] = None
+    note: Optional[str] = None
+    duration_min: Optional[int] = None
     goal_id: Optional[int] = None
     task_id: Optional[int] = None
     remind_at: Optional[str] = None

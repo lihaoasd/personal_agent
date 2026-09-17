@@ -23,6 +23,10 @@ class ChatSendRequest(BaseModel):
     session_id: int = 1
 
 
+class SessionTitleRequest(BaseModel):
+    title: str
+
+
 @router.post("/chat")
 def chat(payload: ChatSendRequest, conn: ConnDep):
     try:
@@ -33,8 +37,9 @@ def chat(payload: ChatSendRequest, conn: ConnDep):
 
 
 @router.get("/chat/sessions")
-def chat_sessions(conn: ConnDep):
-    return repos.list_sessions(conn)
+def chat_sessions(conn: ConnDep, limit: int = 500):
+    limit = max(1, min(limit, 1000))
+    return repos.list_sessions(conn, limit=limit)
 
 
 @router.post("/chat/new")
@@ -47,6 +52,18 @@ def chat_new(conn: ConnDep):
 def chat_messages(session_id: int = 1, limit: int = 500, before_id: int | None = None, conn: ConnDep = None):
     limit = max(1, min(limit, 1000))
     return repos.list_messages(conn, limit=limit, session_id=session_id, before_id=before_id)
+
+
+@router.patch("/chat/sessions/{session_id}")
+def update_session(session_id: int, payload: SessionTitleRequest, conn: ConnDep):
+    repos.update_session_title(conn, session_id, payload.title.strip())
+    return {"ok": True}
+
+
+@router.delete("/chat/sessions/{session_id}")
+def delete_session(session_id: int, conn: ConnDep):
+    repos.delete_session(conn, session_id)
+    return {"ok": True}
 
 
 @router.post("/checkin/backfill")

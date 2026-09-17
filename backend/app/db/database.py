@@ -1,4 +1,4 @@
-"""SQLite 连接管理与建表。"""
+﻿"""SQLite 连接管理与建表。"""
 from __future__ import annotations
 
 import sqlite3
@@ -107,6 +107,20 @@ CREATE TABLE IF NOT EXISTS app_state (
   value      TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- 日记
+CREATE TABLE IF NOT EXISTS diaries (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  diary_date  TEXT NOT NULL,
+  title       TEXT NOT NULL DEFAULT '',
+  content     TEXT NOT NULL DEFAULT '',
+  mood        TEXT NOT NULL DEFAULT '',
+  tags        TEXT NOT NULL DEFAULT '',
+  goal_id     INTEGER REFERENCES goals(id) ON DELETE SET NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_diaries_date ON diaries(diary_date);
 
 -- Agent Loop 执行 trace
 CREATE TABLE IF NOT EXISTS agent_traces (

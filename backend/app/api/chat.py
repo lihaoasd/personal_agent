@@ -1,4 +1,4 @@
-"""对话 / 打卡 / 补记接口。"""
+﻿"""对话 / 打卡 / 补记接口。"""
 from __future__ import annotations
 
 from datetime import date
@@ -70,6 +70,65 @@ def delete_session(session_id: int, conn: ConnDep):
 def get_traces(session_id: int, limit: int = 100, conn: ConnDep = None):
     """获取 Agent Loop 的 trace 日志。"""
     return repos.list_traces(conn, session_id=session_id, limit=limit)
+
+
+# ---------- diaries ----------
+
+from pydantic import BaseModel
+
+class DiaryCreateRequest(BaseModel):
+    diary_date: str
+    title: str = ""
+    content: str = ""
+    mood: str = ""
+    tags: str = ""
+    goal_id: int | None = None
+
+
+class DiaryUpdateRequest(BaseModel):
+    title: str | None = None
+    content: str | None = None
+    mood: str | None = None
+    tags: str | None = None
+    goal_id: int | None = None
+
+
+@router.get("/diaries")
+def list_diaries(start_date: str | None = None, end_date: str | None = None,
+                 limit: int = 100, conn: ConnDep = None):
+    return repos.list_diaries(conn, start_date=start_date, end_date=end_date, limit=limit)
+
+
+@router.post("/diaries")
+def create_diary(payload: DiaryCreateRequest, conn: ConnDep):
+    diary_id = repos.insert_diary(
+        conn, diary_date=payload.diary_date, title=payload.title,
+        content=payload.content, mood=payload.mood, tags=payload.tags,
+        goal_id=payload.goal_id,
+    )
+    return repos.get_diary(conn, diary_id)
+
+
+@router.get("/diaries/{diary_id}")
+def get_diary(diary_id: int, conn: ConnDep = None):
+    d = repos.get_diary(conn, diary_id)
+    if not d:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="日记不存在")
+    return d
+
+
+@router.put("/diaries/{diary_id}")
+def update_diary(diary_id: int, payload: DiaryUpdateRequest, conn: ConnDep = None):
+    fields = {k: v for k, v in payload.model_dump().items() if v is not None}
+    repos.update_diary(conn, diary_id, **fields)
+    return repos.get_diary(conn, diary_id)
+
+
+@router.delete("/diaries/{diary_id}")
+def delete_diary(diary_id: int, conn: ConnDep = None):
+    repos.delete_diary(conn, diary_id)
+    return {"ok": True}
 
 
 @router.post("/checkin/backfill")

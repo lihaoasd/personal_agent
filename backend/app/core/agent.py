@@ -141,11 +141,17 @@ def _handle_agent_loop(conn: Connection, message: str, today: date, session_id: 
     max_loops = 5  # 最多循环 5 次，防止死循环
     step = 0
 
-    # 记录用户消息
+    # 记录用户消息（完整）
     step += 1
     repos.insert_trace(
         conn, session_id=session_id, user_message=message, step=step,
-        role="user", content=message,
+        role="user", content=f"用户消息：{message}",
+    )
+    # 记录系统提示词和上下文
+    repos.insert_trace(
+        conn, session_id=session_id, user_message=message, step=step,
+        role="system", content=f"系统提示词长度：{len(system_prompt)} 字\n历史消息：{len(history)} 条\n工具数量：{len(AGENT_TOOLS)} 个",
+        tool_name="system_prompt",
     )
 
     import time

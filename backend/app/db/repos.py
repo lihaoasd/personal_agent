@@ -398,3 +398,48 @@ def list_traces(conn: Connection, session_id: int, limit: int = 200) -> list[dic
         "SELECT * FROM agent_traces WHERE session_id = ? ORDER BY id ASC LIMIT ?",
         (session_id, limit)).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------- diaries ----------
+
+def insert_diary(conn: Connection, *, diary_date: str, title: str = "",
+                 content: str = "", mood: str = "", tags: str = "",
+                 goal_id: int | None = None) -> int:
+    now = _now_iso()
+    cur = conn.execute(
+        "INSERT INTO diaries (diary_date, title, content, mood, tags, goal_id, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (diary_date, title, content, mood, tags, goal_id, now, now),
+    )
+    return cur.lastrowid
+
+
+def get_diary(conn: Connection, diary_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM diaries WHERE id = ?", (diary_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_diaries(conn: Connection, start_date: str | None = None,
+                 end_date: str | None = None, limit: int = 100) -> list[dict]:
+    if start_date and end_date:
+        rows = conn.execute(
+            "SELECT * FROM diaries WHERE diary_date BETWEEN ? AND ? ORDER BY diary_date DESC LIMIT ?",
+            (start_date, end_date, limit)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM diaries ORDER BY diary_date DESC LIMIT ?",
+            (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_diary(conn: Connection, diary_id: int, **fields) -> None:
+    if not fields:
+        return
+    fields["updated_at"] = _now_iso()
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    vals = list(fields.values()) + [diary_id]
+    conn.execute(f"UPDATE diaries SET {sets} WHERE id = ?", vals)
+
+
+def delete_diary(conn: Connection, diary_id: int) -> None:
+    conn.execute("DELETE FROM diaries WHERE id = ?", (diary_id,))

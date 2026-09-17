@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import dayjs from 'dayjs'
@@ -15,6 +15,7 @@ const menus = [
   { path: '/goals', label: '目标计划', emoji: '🎯' },
   { path: '/schedules', label: '日程', emoji: '📅' },
   { path: '/reviews', label: '复盘', emoji: '📝' },
+  { path: '/diaries', label: '日记', emoji: '📔' },
 ]
 </script>
 

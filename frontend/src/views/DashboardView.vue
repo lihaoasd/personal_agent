@@ -6,6 +6,7 @@ import CountUp from '../components/CountUp.vue'
 import Confetti from '../components/Confetti.vue'
 
 const stats = ref<any>(null)
+const diaries = ref<any[]>([])
 const loading = ref(false)
 const confettiTrigger = ref(0)
 const prevTotal = ref(0)
@@ -19,11 +20,15 @@ const milestones = [10, 30, 50, 100, 200]
 async function load() {
   loading.value = true
   try {
-    const { data } = await client.get('/stats/dashboard')
-    // 里程碑检测：跨越阈值时撒花
-    const crossed = milestones.some((m) => prevTotal.value < m && data.total_events >= m)
+    const [statsRes, diariesRes] = await Promise.all([
+      client.get('/stats/dashboard'),
+      client.get('/diaries', { params: { limit: 20 } }),
+    ])
+    diaries.value = diariesRes.data
+    const data = statsRes.data
+    const crossed = milestones.some((m) => prevTotal.value < m && diaries.value.length >= m)
     if (crossed) confettiTrigger.value++
-    prevTotal.value = data.total_events
+    prevTotal.value = diaries.value.length
     stats.value = data
   } finally {
     loading.value = false
@@ -33,6 +38,15 @@ async function load() {
 function maxCount(arr: any[]) {
   return Math.max(1, ...arr.map((x) => x.count))
 }
+
+import { computed } from 'vue'
+const moodStats = computed(() => {
+  const map: Record<string, number> = {}
+  diaries.value.forEach(d => {
+    if (d.mood) map[d.mood] = (map[d.mood] || 0) + 1
+  })
+  return Object.entries(map).map(([mood, count]) => ({ mood, count }))
+})
 
 onMounted(load)
 </script>
@@ -48,14 +62,14 @@ onMounted(load)
 
     <div v-loading="loading" v-if="stats">
       <!-- 成长小树苗 -->
-      <GrowthTree :count="stats.total_events" class="tree-card" />
+      <GrowthTree :count="diaries.length" class="tree-card" />
 
       <!-- 统计卡片 -->
       <div class="stat-grid">
         <div class="stat-card mint">
           <div class="stat-emoji">💬</div>
-          <div class="stat-num"><CountUp :value="stats.total_events" /></div>
-          <div class="stat-label">累计记录</div>
+          <div class="stat-num"><CountUp :value="diaries.length" /></div>
+          <div class="stat-label">累计日记</div>
         </div>
         <div class="stat-card peach">
           <div class="stat-emoji">📈</div>
@@ -94,25 +108,25 @@ onMounted(load)
         </div>
 
         <div class="panel">
-          <div class="panel-title">🌈 记录类型分布</div>
-          <div v-if="!stats.event_type_breakdown.length" class="panel-empty">还没有记录～</div>
-          <div v-for="e in stats.event_type_breakdown" :key="e.event_type" class="type-row">
-            <span class="type-name">{{ e.event_type }}</span>
+          <div class="panel-title">😊 心情分布</div>
+          <div v-if="!moodStats.length" class="panel-empty">还没有日记～</div>
+          <div v-for="m in moodStats" :key="m.mood" class="type-row">
+            <span class="type-name">{{ m.mood }}</span>
             <div class="type-bar">
-              <div class="type-fill" :style="{ width: (e.count / maxCount(stats.event_type_breakdown) * 100) + '%' }"></div>
+              <div class="type-fill" :style="{ width: (m.count / maxCount(moodStats) * 100) + '%' }"></div>
             </div>
-            <span class="type-count">{{ e.count }}</span>
+            <span class="type-count">{{ m.count }}</span>
           </div>
         </div>
       </div>
 
       <div class="panel recent">
-        <div class="panel-title">🌟 最近记录</div>
-        <div v-if="!stats.recent_events.length" class="panel-empty">还没有记录～</div>
-        <div v-for="(e, i) in stats.recent_events" :key="i" class="recent-row">
-          <span class="recent-date">📅 {{ e.happened_on }}</span>
-          <span class="recent-content">{{ e.content }}</span>
-          <span v-if="e.goal_title" class="recent-goal">{{ e.goal_title }}</span>
+        <div class="panel-title">🌟 最近日记</div>
+        <div v-if="!diaries.length" class="panel-empty">还没有日记～</div>
+        <div v-for="d in diaries.slice(0, 5)" :key="d.id" class="recent-row">
+          <span class="recent-date">📅 {{ d.diary_date }}</span>
+          <span v-if="d.mood" class="recent-mood">{{ d.mood }}</span>
+          <span class="recent-content">{{ d.title || d.content.slice(0, 30) }}</span>
         </div>
       </div>
     </div>

@@ -417,7 +417,7 @@ onUnmounted(() => window.clearInterval(pollTimer))
                   </td>
                   <td class="col-role">
                     <span class="role-badge" :class="t.role">
-                      {{ t.role === 'user' ? '👤' : t.role === 'assistant' ? '🤖' : '🔧' }}
+                      {{ t.role === 'user' ? '👤' : t.role === 'assistant' ? '🤖' : t.role === 'system' ? '⚙️' : '🔧' }}
                     </span>
                   </td>
                   <td class="col-content">
@@ -435,7 +435,7 @@ onUnmounted(() => window.clearInterval(pollTimer))
             <div v-if="currentStep" class="detail-card">
               <div class="detail-head">
                 <span class="role-badge" :class="currentStep.role">
-                  {{ currentStep.role === 'user' ? '👤 用户消息' : currentStep.role === 'assistant' ? '🤖 模型输出' : '🔧 工具调用' }}
+                  {{ currentStep.role === 'user' ? '👤 用户消息' : currentStep.role === 'assistant' ? '🤖 模型输出' : currentStep.role === 'system' ? '⚙️ 系统信息' : '🔧 工具调用' }}
                 </span>
                 <span class="detail-step">Step {{ currentStep.step }}</span>
                 <span class="detail-time">{{ currentStep.created_at }}</span>
@@ -1053,6 +1053,7 @@ onUnmounted(() => window.clearInterval(pollTimer))
 .role-badge.user { color: #4a6a9a; }
 .role-badge.assistant { color: #5a4a8a; }
 .role-badge.tool { color: #3d8b6a; }
+.role-badge.system { color: #888; }
 .content-text {
   color: #5a4a3a;
   line-height: 1.4;

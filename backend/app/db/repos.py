@@ -57,7 +57,7 @@ def active_goals(conn: Connection) -> list[dict]:
 
 
 def update_goal(conn: Connection, goal_id: int, **fields) -> dict | None:
-    allowed = {"title", "description", "category", "status", "target_date"}
+    allowed = {"title", "description", "category", "status", "target_date", "reason", "abandon_reason"}
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if not updates:
         return get_goal(conn, goal_id)

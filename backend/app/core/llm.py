@@ -55,6 +55,7 @@ class OpenAICompatProvider:
             "model": self.model,
             "messages": messages,
             "temperature": 0.3,
+            "thinking": {"type": "enabled"},  # 开启推理模式
         }
         if tools:
             payload["tools"] = tools

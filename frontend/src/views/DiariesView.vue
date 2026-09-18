@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
+import { marked } from 'marked'
 import client from '../api/client'
 
 const diaries = ref<any[]>([])
@@ -71,9 +72,14 @@ function buildContent() {
   if (!t || !t.questions) return editorForm.value.content
   const lines = t.questions.map((q, i) => {
     const ans = guideAnswers.value[q.key] || ''
-    return ans ? `${q.emoji} ${q.text.replace('？', '')}：${ans}` : ''
+    if (!ans) return ''
+    return `## ${q.emoji} ${q.text}\n\n${ans}`
   }).filter(Boolean)
   return lines.join('\n\n')
+}
+
+function renderMarkdown(text: string) {
+  return marked(text || '')
 }
 
 const filteredDiaries = computed(() => {
@@ -111,14 +117,25 @@ function openEdit(d: any) {
 }
 
 async function saveDiary() {
-  const body = {
-    diary_date: selectedDate.value,
-    ...editorForm.value,
+  const content = buildContent()
+  // 自动生成标题
+  let title = editorForm.value.title
+  if (!title) {
+    const t = templates.find(x => x.key === selectedTemplate.value)
+    if (t && t.key !== 'free') {
+      title = t.label + ' · ' + selectedDate.value.slice(5)
+    } else if (content) {
+      title = content.replace(/\n/g, ' ').slice(0, 15)
+    }
   }
+  const payload = { ...editorForm.value, content, title }
   if (editingDiary.value) {
-    await client.put(`/diaries/${editingDiary.value.id}`, editorForm.value)
+    await client.put(`/diaries/${editingDiary.value.id}`, payload)
   } else {
-    await client.post('/diaries', body)
+    await client.post('/diaries', {
+      diary_date: selectedDate.value,
+      ...payload,
+    })
   }
   showEditor.value = false
   await loadDiaries()
@@ -234,7 +251,7 @@ onMounted(loadDiaries)
           <div v-if="d.tags" class="diary-tags">
             <span v-for="tag in d.tags.split(',').filter(Boolean)" :key="tag" class="tag">#{{ tag.trim() }}</span>
           </div>
-          <div class="diary-body">{{ d.content }}</div>
+          <div class="diary-body" v-html="renderMarkdown(d.content)"></div>
         </div>
       </div>
     </div>
@@ -268,7 +285,21 @@ onMounted(loadDiaries)
           </div>
         </div>
 
-        <!-- 第二步：引导问答模式 -->
+        <!-- 第二步：心情 -->
+        <div class="form-row">
+          <label>心情</label>
+          <div class="mood-picker">
+            <span
+              v-for="m in moods"
+              :key="m"
+              class="mood-option"
+              :class="{ active: editorForm.mood === m }"
+              @click="editorForm.mood = m"
+            >{{ m }}</span>
+          </div>
+        </div>
+
+        <!-- 第三步：引导问答模式 -->
         <template v-if="isGuided && selectedTemplate !== 'free'">
           <div
             v-for="(q, i) in templates.find(t => t.key === selectedTemplate)?.questions"
@@ -286,52 +317,31 @@ onMounted(loadDiaries)
               :placeholder="q.placeholder"
             />
           </div>
-          <button class="free-toggle" @click="isGuided = false">
-            ✏️ 切换到自由编辑模式
+        </template>
+
+        <!-- 自由编辑模式才显示内容输入框 -->
+        <div v-if="!isGuided || selectedTemplate === 'free'" class="form-row">
+          <label>内容</label>
+          <el-input
+            v-model="editorForm.content"
+            type="textarea"
+            :rows="6"
+            placeholder="今天发生了什么？有什么感想？随便写写～"
+          />
+        </div>
+
+        <!-- 切换模式按钮（只有一个） -->
+        <div v-if="selectedTemplate !== 'free'" class="form-row">
+          <button class="free-toggle" @click="isGuided = !isGuided">
+            {{ isGuided ? '✏️ 切换到自由编辑模式' : '💡 回到引导模式' }}
           </button>
-        </template>
-
-        <!-- 自由编辑模式 -->
-        <template v-else>
-          <div class="form-row">
-            <label>心情</label>
-            <div class="mood-picker">
-              <span
-                v-for="m in moods"
-                :key="m"
-                class="mood-option"
-                :class="{ active: editorForm.mood === m }"
-                @click="editorForm.mood = m"
-              >{{ m }}</span>
-            </div>
-          </div>
-
-          <div class="form-row">
-            <label>标题</label>
-            <el-input v-model="editorForm.title" placeholder="给今天起个小标题～" />
-          </div>
-
-          <div class="form-row">
-            <label>内容</label>
-            <el-input
-              v-model="editorForm.content"
-              type="textarea"
-              :rows="6"
-              placeholder="今天发生了什么？有什么感想？随便写写～"
-            />
-          </div>
-
-          <div v-if="selectedTemplate !== 'free'" class="form-row">
-            <button class="free-toggle" @click="isGuided = true">
-              💡 回到引导模式
-            </button>
-          </div>
-        </template>
+        </div>
 
         <div class="form-row">
           <label>标签（逗号分隔）</label>
           <el-input v-model="editorForm.tags" placeholder="比如：运动, 阅读, 开心" />
         </div>
+
       </div>
 
       <template #footer>

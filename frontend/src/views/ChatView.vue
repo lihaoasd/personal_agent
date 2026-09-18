@@ -1,8 +1,13 @@
 ﻿<script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import client from '../api/client'
+import { marked } from 'marked'
 
 const messages = ref<any[]>([])
+function renderMarkdown(text: string) {
+  if (!text) return ''
+  return marked.parse(text)
+}
 const templates = ref<any[]>([])
 const input = ref('')
 const sending = ref(false)
@@ -204,23 +209,91 @@ async function send(text?: string) {
   scrollBottom()
   try {
     const { data } = await client.post('/chat', { message: content, session_id: currentSessionId.value })
-    const msgId = Date.now()
-    messages.value.push({ role: 'assistant', content: data.reply, id: msgId, display: '' })
-    // 打字机效果
-    const full = data.reply
-    let i = 0
-    const typeInterval = setInterval(() => {
-      i += 2
-      const msg = messages.value.find((m) => m.id === msgId)
-      if (msg) {
-        msg.display = full.slice(0, i)
-        scrollBottom()
-      }
-      if (i >= full.length) {
-        clearInterval(typeInterval)
-        if (msg) msg.display = full
-      }
-    }, 18)
+    // 如果有待确认操作，不显示 assistant 气泡，直接弹框
+    if (!data.pending_action && data.reply) {
+      const msgId = Date.now()
+      messages.value.push({ role: 'assistant', content: data.reply, id: msgId, display: '' })
+      // 打字机效果
+      const full = data.reply
+      let i = 0
+      const typeInterval = setInterval(() => {
+        i += 2
+        const msg = messages.value.find((m) => m.id === msgId)
+        if (msg) {
+          msg.display = full.slice(0, i)
+          scrollBottom()
+        }
+        if (i >= full.length) {
+          clearInterval(typeInterval)
+          if (msg) msg.display = full
+        }
+      }, 18)
+    }
+
+    // 有待确认操作，弹确认框
+    if (data.pending_action) {
+      setTimeout(async () => {
+        const action = data.pending_action
+        const desc = action.action_desc
+        const args = action.action_args
+        const displayName = action.display_name || ''
+        let detail = `内容：${displayName}`
+        // 补充显示改了什么
+        const changes = []
+        if (args.new_title) changes.push(`新标题：${args.new_title}`)
+        if (args.reason) changes.push(`新理由：${args.reason}`)
+        if (args.status) changes.push(`新状态：${args.status}`)
+        if (args.note) changes.push(`新备注：${args.note}`)
+        if (args.new_start_at) changes.push(`新时间：${args.new_start_at}`)
+        if (args.new_mood) changes.push(`新心情：${args.new_mood}`)
+        if (changes.length > 0) detail += '\n' + changes.join('\n')
+
+        const { ElMessageBox } = await import('element-plus')
+        try {
+          await ElMessageBox.confirm(detail, `确认要${desc}吗？`, {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning',
+            borderRadius: '16px',
+          })
+          client.post('/chat/execute-action', {
+            action_type: action.action_type,
+            action_args: args,
+          }, { params: { session_id: currentSessionId.value } }).then((res) => {
+            const reply = res.data.reply
+            const msgId = Date.now()
+            messages.value.push({ role: 'assistant', content: reply, id: msgId, display: '' })
+            // 打字机效果
+            const full = reply
+            let i = 0
+            const typeInterval = setInterval(() => {
+              i += 2
+              const msg = messages.value.find((m) => m.id === msgId)
+              if (msg) {
+                msg.display = full.slice(0, i)
+                scrollBottom()
+              }
+              if (i >= full.length) {
+                clearInterval(typeInterval)
+                if (msg) msg.display = full
+              }
+            }, 18)
+            loadSessions()
+          })
+        } catch {
+          // 记录取消操作到 trace
+          client.post('/chat/cancel-action', null, { params: { action_desc: desc, session_id: currentSessionId.value } })
+          messages.value.push({
+            role: 'assistant',
+            content: `❌ 已取消${desc}`,
+            id: Date.now(),
+            display: `❌ 已取消${desc}`,
+          })
+          scrollBottom()
+        }
+      }, 300)
+    }
+
     await checkStatus()
     await loadSessions()
   } finally {
@@ -347,7 +420,7 @@ onUnmounted(() => window.clearInterval(pollTimer))
         <div class="empty-hint">比如「今天读了 30 页书」「明天下午 3 点健身」</div>
       </div>
       <div v-for="m in messages" :key="m.id" class="chat-row" :class="m.role">
-        <div class="bubble" :class="m.role">{{ m.display || m.content }}</div>
+        <div class="bubble" :class="m.role" v-html="renderMarkdown(m.display || m.content)"></div>
       </div>
       <div v-if="sending" class="chat-row assistant">
         <div class="bubble assistant thinking">
@@ -833,8 +906,50 @@ onUnmounted(() => window.clearInterval(pollTimer))
   border-radius: 20px;
   font-size: 14px;
   line-height: 1.7;
-  white-space: pre-wrap;
   word-break: break-word;
+}
+.bubble :deep(p) {
+  margin: 0.5em 0;
+}
+.bubble :deep(p:first-child) {
+  margin-top: 0;
+}
+.bubble :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.bubble :deep(ul), .bubble :deep(ol) {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.bubble :deep(code) {
+  background: rgba(0,0,0,0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.bubble :deep(pre) {
+  background: rgba(0,0,0,0.06);
+  padding: 10px 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.bubble :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+.bubble :deep(h1), .bubble :deep(h2), .bubble :deep(h3) {
+  margin: 0.6em 0 0.3em;
+  font-weight: 600;
+}
+.bubble :deep(h1) { font-size: 1.2em; }
+.bubble :deep(h2) { font-size: 1.1em; }
+.bubble :deep(h3) { font-size: 1.05em; }
+.bubble :deep(blockquote) {
+  border-left: 3px solid var(--el-color-primary);
+  padding-left: 12px;
+  margin: 0.5em 0;
+  opacity: 0.8;
 }
 .bubble.user {
   background: linear-gradient(135deg, #b8e6d0, #9dd8ba);

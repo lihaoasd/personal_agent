@@ -218,6 +218,88 @@ def cancel_action(action_desc: str, session_id: int, conn: ConnDep):
     return {"ok": True}
 
 
+# ---------- 日记引导问题生成（动态，根据上一个回答生成下一个） ----------
+
+class NextGuideRequest(BaseModel):
+    content: str  # 日记原始内容
+    history: list[dict] = []  # [{question: "...", answer: "..."}]
+
+
+@router.post("/diaries/next-guide")
+def next_guide(payload: NextGuideRequest):
+    """根据日记内容和历史回答，生成下一个引导问题。"""
+    from ..core import llm
+    import json
+
+    system = """你是一个专业的日记引导助手，用苏格拉底式提问法，引导用户完成 情绪 → 意义 → 行动 的深度闭环。
+
+三个层次的探索：
+1. **情绪层（感受）**
+   - 目标：让用户看见、接纳自己此刻的情绪
+   - 方向：感受是什么？强度如何？身体哪里有反应？
+   - 例子："现在回想这件事，你身体里最先冒出来的感觉是什么？"
+
+2. **意义层（认知）**
+   - 目标：让用户理解情绪背后的需求、信念、期待
+   - 方向：这件事对你意味着什么？你真正在意的是什么？
+   - 例子："这件事让你特别在意的点是什么？那背后是你想要的什么？"
+
+3. **行动层（成长）**
+   - 目标：让用户把觉察转化为未来的小行动
+   - 方向：下次遇到怎么做？你想对自己说什么？
+   - 例子："下次再遇到这样的时刻，你想给自己一个什么样的小提醒？"
+
+规则：
+1. 按 情绪 → 意义 → 行动 的顺序逐层深入
+2. 不需要固定问题数量，根据用户回答的深入程度灵活调整
+3. 用户已经回答得很充分了，可以提前结束
+4. 三个层次都覆盖到了，就结束
+5. 问题要结合用户写的具体内容，不要空泛
+6. 每个问题配一个 emoji
+7. 问题要短，像聊天一样自然
+8. 输出严格 JSON 格式：
+{
+  "has_next": true,
+  "question": {
+    "emoji": "💭",
+    "text": "问题内容"
+  }
+}
+
+闭环完成，可以结束了：
+{
+  "has_next": false,
+  "question": null
+}
+
+只输出 JSON，不要其他内容。"""
+
+    history_text = ""
+    for i, h in enumerate(payload.history):
+        history_text += f"Q{i+1}: {h['question']}\nA{i+1}: {h['answer']}\n\n"
+
+    user = f"""用户写的日记内容：
+{payload.content}
+
+已经回答的问题：
+{history_text}
+
+请生成下一个引导问题，或者判断是否可以结束。"""
+
+    try:
+        resp = llm.chat_text(system, user)
+        resp = resp.strip()
+        if resp.startswith("```"):
+            resp = resp.split("```")[1]
+            if resp.startswith("json"):
+                resp = resp[4:]
+            resp = resp.strip()
+        data = json.loads(resp)
+        return data
+    except Exception as e:
+        return {"has_next": False, "question": None}
+
+
 @router.post("/checkin/backfill")
 def backfill(payload: BackfillRequest, conn: ConnDep):
     today = date.today()
